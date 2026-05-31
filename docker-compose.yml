@@ -1,0 +1,303 @@
+services:
+  # ========== REVERSE PROXY ==========
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    profiles:
+      - with-proxy
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.selfsigned.acme.tlschallenge=false"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./certs:/certs:ro"
+    networks:
+      - atlassian_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.local`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+    restart: unless-stopped
+
+  # ========== DATABASES ==========
+  jira_db:
+    image: postgres:${POSTGRES_TAG:-16-alpine}
+    container_name: jira_db
+    environment:
+      POSTGRES_USER: ${JIRA_DB_USER:-jira}
+      POSTGRES_PASSWORD: ${JIRA_DB_PASSWORD:-dbpassword}
+      POSTGRES_DB: ${JIRA_DB_NAME:-jiradb}
+    volumes:
+      - jira_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -q -d ${JIRA_DB_NAME:-jiradb} -U ${JIRA_DB_USER:-jira}" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - atlassian_net
+    deploy:
+      resources:
+        limits:
+          memory: ${JIRA_DB_MEMORY:-1024m}
+
+  crowd_db:
+    image: postgres:${POSTGRES_TAG:-16-alpine}
+    container_name: crowd_db
+    environment:
+      POSTGRES_USER: ${CROWD_DB_USER:-crowd}
+      POSTGRES_PASSWORD: ${CROWD_DB_PASSWORD:-dbpassword}
+      POSTGRES_DB: ${CROWD_DB_NAME:-crowddb}
+    volumes:
+      - crowd_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -q -d ${CROWD_DB_NAME:-crowddb} -U ${CROWD_DB_USER:-crowd}" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - atlassian_net
+    deploy:
+      resources:
+        limits:
+          memory: ${CROWD_DB_MEMORY:-1024m}
+
+  confluence_db:
+    image: postgres:${POSTGRES_TAG:-16-alpine}
+    container_name: confluence_db
+    environment:
+      POSTGRES_USER: ${CONFLUENCE_DB_USER:-confluence}
+      POSTGRES_PASSWORD: ${CONFLUENCE_DB_PASSWORD:-dbpassword}
+      POSTGRES_DB: ${CONFLUENCE_DB_NAME:-confluencedb}
+    volumes:
+      - confluence_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -q -d ${CONFLUENCE_DB_NAME:-confluencedb} -U ${CONFLUENCE_DB_USER:-confluence}" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - atlassian_net
+    deploy:
+      resources:
+        limits:
+          memory: ${CONFLUENCE_DB_MEMORY:-1024m}
+
+  bitbucket_db:
+    image: postgres:${POSTGRES_TAG:-16-alpine}
+    container_name: bitbucket_db
+    environment:
+      POSTGRES_USER: ${BITBUCKET_DB_USER:-bitbucket}
+      POSTGRES_PASSWORD: ${BITBUCKET_DB_PASSWORD:-dbpassword}
+      POSTGRES_DB: ${BITBUCKET_DB_NAME:-bitbucketdb}
+    volumes:
+      - bitbucket_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -q -d ${BITBUCKET_DB_NAME:-bitbucketdb} -U ${BITBUCKET_DB_USER:-bitbucket}" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - atlassian_net
+    deploy:
+      resources:
+        limits:
+          memory: ${BITBUCKET_DB_MEMORY:-1024m}
+
+  # ========== Applications ==========
+  jira:
+    image: atlassian/jira-software:${JIRA_VERSION:-10.7.3}
+    container_name: jira_app
+    hostname: jira
+    depends_on:
+      jira_db:
+        condition: service_healthy
+    volumes:
+      - jira_data:/var/atlassian/jira
+      - ${AGENT_JAR_PATH}:/handler.jar:ro
+    environment:
+      ATL_DB_TYPE: postgresql
+      ATL_JDBC_URL: jdbc:postgresql://${JIRA_DB_HOST:-jira_db}:5432/${JIRA_DB_NAME:-jiradb}
+      ATL_JDBC_USER: ${JIRA_DB_USER:-jira}
+      ATL_JDBC_PASSWORD: ${JIRA_DB_PASSWORD:-dbpassword}
+      JAVA_OPTS: -javaagent:/handler.jar
+      JVM_MINIMUM_MEMORY: ${JIRA_JVM_MIN_MEM:-1024m}
+      JVM_MAXIMUM_MEMORY: ${JIRA_JVM_MAX_MEM:-2048m}
+      JVM_RESERVED_CODE_CACHE_SIZE: ${JIRA_JVM_RESERVED_CODE_CACHE_SIZE:-1G}
+      JVM_CODE_CACHE_ARGS: '-XX:InitialCodeCacheSize=1g -XX:ReservedCodeCacheSize=8g'
+      TZ: ${TIMEZONE:-Europe/Moscow}
+      ATL_PROXY_NAME: ${JIRA_PROXY_NAME:-jira.local}
+      ATL_PROXY_PORT: ${JIRA_PROXY_PORT:-443}
+      ATL_TOMCAT_SCHEME: ${JIRA_TOMCAT_SCHEME:-https}
+      ATL_TOMCAT_SECURE: ${JIRA_TOMCAT_SECURE:-true}
+    restart: unless-stopped
+    networks:
+      - atlassian_net
+    deploy:
+      resources:
+        limits:
+          memory: ${JIRA_MEMORY:-4096m}
+    labels:
+      - "traefik.enable=${USE_TRAEFIK:-true}"
+      - "traefik.http.routers.jira.rule=Host(`${JIRA_PROXY_NAME:-jira.local}`)"
+      - "traefik.http.routers.jira.entrypoints=websecure"
+      - "traefik.http.routers.jira.tls=true"
+      - "traefik.http.services.jira.loadbalancer.server.port=8080"
+      - "traefik.http.routers.jira.middlewares=jira-headers"
+      - "traefik.http.middlewares.jira-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+    ports:
+      - "8080:8080"
+
+  crowd:
+    image: atlassian/crowd:${CROWD_VERSION:-7.2-ubuntu-jdk-21}
+    container_name: crowd_app
+    hostname: crowd
+    depends_on:
+      crowd_db:
+        condition: service_healthy
+    volumes:
+      - crowd_data:/var/atlassian/crowd
+      - ${AGENT_JAR_PATH}:/handler.jar:ro
+    environment:
+      ATL_DB_TYPE: postgresql
+      ATL_JDBC_URL: jdbc:postgresql://${CROWD_DB_HOST:-crowd_db}:5432/${CROWD_DB_NAME:-crowddb}
+      ATL_JDBC_USER: ${CROWD_DB_USER:-crowd}
+      ATL_JDBC_PASSWORD: ${CROWD_DB_PASSWORD:-dbpassword}
+      JAVA_OPTS: -javaagent:/handler.jar
+      JVM_MINIMUM_MEMORY: ${CROWD_JVM_MIN_MEM:-1024m}
+      JVM_MAXIMUM_MEMORY: ${CROWD_JVM_MAX_MEM:-2048m}
+      TZ: ${TIMEZONE:-Europe/Moscow}
+    restart: unless-stopped
+    networks:
+      - atlassian_net
+    deploy:
+      resources:
+        limits:
+          memory: ${CROWD_MEMORY:-2048m}
+    labels:
+      - "traefik.enable=${USE_TRAEFIK:-true}"
+      - "traefik.http.routers.crowd.rule=Host(`${CROWD_PROXY_NAME:-crowd.local}`)"
+      - "traefik.http.routers.crowd.entrypoints=websecure"
+      - "traefik.http.routers.crowd.tls=true"
+      - "traefik.http.services.crowd.loadbalancer.server.port=8095"
+    ports:
+      - "8095:8095"
+
+  confluence:
+    image: atlassian/confluence:${CONFLUENCE_VERSION:-10.2.3-ubi9-jdk21}
+
+    container_name: confluence_app
+    hostname: confluence
+    depends_on:
+      confluence_db:
+        condition: service_healthy
+    volumes:
+      - confluence_data:/var/atlassian/application-data/confluence
+      - ${AGENT_JAR_PATH}:/handler.jar:ro
+    environment:
+      ATL_DB_TYPE: postgresql
+      ATL_JDBC_URL: jdbc:postgresql://${CONFLUENCE_DB_HOST:-confluence_db}:5432/${CONFLUENCE_DB_NAME:-confluencedb}
+      ATL_JDBC_USER: ${CONFLUENCE_DB_USER:-confluence}
+      ATL_JDBC_PASSWORD: ${CONFLUENCE_DB_PASSWORD:-dbpassword}
+      JAVA_OPTS: -javaagent:/handler.jar
+      JVM_MINIMUM_MEMORY: ${CONFLUENCE_JVM_MIN_MEM:-4G}
+      JVM_MAXIMUM_MEMORY: ${CONFLUENCE_JVM_MAX_MEM:-12G}
+      TZ: ${TIMEZONE:-Europe/Moscow}
+      ATL_PROXY_NAME: ${CONFLUENCE_PROXY_NAME:-confluence.local}
+      ATL_PROXY_PORT: ${CONFLUENCE_PROXY_PORT:-443}
+      ATL_TOMCAT_SCHEME: ${CONFLUENCE_TOMCAT_SCHEME:-https}
+      ATL_TOMCAT_SECURE: ${CONFLUENCE_TOMCAT_SECURE:-true}
+    restart: unless-stopped
+    networks:
+      - atlassian_net
+    deploy:
+      resources:
+        limits:
+          memory: ${CONFLUENCE_MEMORY:-8192m}
+    labels:
+      - "traefik.enable=${USE_TRAEFIK:-true}"
+      - "traefik.http.routers.confluence.rule=Host(`${CONFLUENCE_PROXY_NAME:-confluence.local}`)"
+      - "traefik.http.routers.confluence.entrypoints=websecure"
+      - "traefik.http.routers.confluence.tls=true"
+      - "traefik.http.services.confluence.loadbalancer.server.port=8090"
+      - "traefik.http.routers.confluence.middlewares=confluence-headers"
+      - "traefik.http.middlewares.confluence-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+    ports:
+      - "8090:8090"
+
+  bitbucket:
+    image: atlassian/bitbucket:${BITBUCKET_VERSION:-9.6.2-ubi9-jdk21}
+    container_name: bitbucket_app
+    hostname: bitbucket
+    depends_on:
+      bitbucket_db:
+        condition: service_healthy
+    volumes:
+      - bitbucket_data:/var/atlassian/application-data/bitbucket
+      - ${AGENT_JAR_PATH}:/handler.jar:ro
+    environment:
+      ATL_DB_TYPE: postgresql
+      ATL_JDBC_URL: jdbc:postgresql://${BITBUCKET_DB_HOST:-bitbucket_db}:5432/${BITBUCKET_DB_NAME:-bitbucketdb}
+      ATL_JDBC_USER: ${BITBUCKET_DB_USER:-bitbucket}
+      ATL_JDBC_PASSWORD: ${BITBUCKET_DB_PASSWORD:-dbpassword}
+      JAVA_OPTS: -javaagent:/handler.jar
+      JVM_MINIMUM_MEMORY: ${BITBUCKET_JVM_MIN_MEM:-1024m}
+      JVM_MAXIMUM_MEMORY: ${BITBUCKET_JVM_MAX_MEM:-2048m}
+      TZ: ${TIMEZONE:-Europe/Moscow}
+      ATL_PROXY_NAME: ${BITBUCKET_PROXY_NAME:-bitbucket.local}
+      ATL_PROXY_PORT: ${BITBUCKET_PROXY_PORT:-443}
+      ATL_TOMCAT_SCHEME: ${BITBUCKET_TOMCAT_SCHEME:-https}
+      ATL_TOMCAT_SECURE: ${BITBUCKET_TOMCAT_SECURE:-true}
+    restart: unless-stopped
+    networks:
+      - atlassian_net
+    deploy:
+      resources:
+        limits:
+          memory: ${BITBUCKET_MEMORY:-4096m}
+    labels:
+      - "traefik.enable=${USE_TRAEFIK:-true}"
+      - "traefik.http.routers.bitbucket.rule=Host(`${BITBUCKET_PROXY_NAME:-bitbucket.local}`)"
+      - "traefik.http.routers.bitbucket.entrypoints=websecure"
+      - "traefik.http.routers.bitbucket.tls=true"
+      - "traefik.http.services.bitbucket.loadbalancer.server.port=7990"
+    ports:
+      - "7990:7990"
+
+volumes:
+  jira_data:
+    driver: local
+  jira_postgres_data:
+    driver: local
+  crowd_data:
+    driver: local
+  crowd_postgres_data:
+    driver: local
+  confluence_data:
+    driver: local
+  confluence_postgres_data:
+    driver: local
+  bitbucket_data:
+    driver: local
+  bitbucket_postgres_data:
+    driver: local
+
+networks:
+  atlassian_net:
+    driver: bridge
