@@ -1,38 +1,10 @@
 # Atlassian Docker Compose
 
-Полноценная Docker-compose экосистема для развёртывания Atlassian продуктов (Jira, Confluence, Crowd, Bitbucket) с единой точкой входа через Traefik reverse proxy, поддержкой SSL, корпоративного прокси и автоматической генерации лицензий.
+Full-fledged Docker-compose ecosystem for deploying Atlassian products (Jira, Confluence, Crowd, Bitbucket) with a single entry point via Traefik reverse proxy, SSL support, corporate proxy, and automatic license generation.
 
-## Архитектура
+## Quick Start
 
-```
-                         ┌──────────────────────┐
-                         │      Traefik          │
-                         │   (Reverse Proxy)     │
-                         │   :80 / :443 (HTTPS)  │
-                         └────┬──────┬──────┬────┘
-                              │      │      │
-                     ┌────────┘      │      └─────────┐─────────────┐
-                     ▼               ▼                ▼             ▼
-               ┌──────────┐  ┌──────────┐   ┌──────────────┐  ┌──────────┐
-               │   Jira   │  │  Crowd   │   │  Confluence  │  │ Bitbucket│
-               │ :8080    │  │ :8095    │   │ :8090        │  │ :7990    │
-               └────┬─────┘  └────┬─────┘   └──────┬───────┘  └────┬─────┘
-                    │             │                │               │
-                    └─────────────┼────────────────┼───────────────┘
-                                  │                │
-                            ┌─────▼──────┐   ┌─────▼──────┐
-                            │ PostgreSQL │   │ PostgreSQL │
-                            │   (Jira)   │   │  (Crowd)   │
-                            └────────────┘   └────────────┘
-                            ┌─────▼───────┐  ┌─────▼──────┐
-                            │ PostgreSQL  │  │ PostgreSQL │
-                            │ (Confluence)│  │ (Bitbucket)│
-                            └─────────────┘  └────────────┘
-```
-
-## Быстрый старт
-
-### 1. Интерактивная установка (рекомендуется)
+### 1. Interactive installation (recommended)
 
 ```bash
 cd atlassian-compose
@@ -40,41 +12,40 @@ chmod +x install.sh
 ./install.sh
 ```
 
-Скрипт последовательно запросит:
-- Выбор компонентов для установки (Jira, Confluence, Crowd, Bitbucket)
-- Настройки БД (общий пользователь, пароль, префикс названий)
-- JVM память для каждого продукта
-- SSL сертификаты (опционально)
-- Reverse proxy домены (Traefik)
-- Корпоративный прокси (опционально)
-- Автоматически сгенерирует .env файл, сертификаты и запустит контейнеры
+The script will sequentially prompt for:
+- Selection of components to install (Jira, Confluence, Crowd, Bitbucket)
+- Database settings (common user, password, name prefix)
+- JVM memory for each product
+- SSL certificates (optional)
+- Reverse proxy domains (Traefik)
+- Corporate proxy (optional)
+- Automatically generates .env file, certificates and starts containers
 
-### 2. Ручная установка
+### 2. Manual installation
 
-1. **Настройте .env файл**:
-   ```bash
-   cp .env.example .env
-   # Отредактируйте .env под свои нужды
-   ```
+1. **Configure the .env file**:
+```bash
+cp .env.example .env
+# Edit .env according to your needs
+```
 
-2. **Сгенерируйте SSL сертификаты**:
-   ```bash
-   cd certs
-   chmod +x generate-certs.sh
-   ./generate-certs.sh
-   ```
+2. **Generate SSL certificates**:
+```bash
+cd certs
+chmod +x generate-certs.sh
+./generate-certs.sh
+```
 
-3. **Запустите контейнеры**:
-   ```bash
-   docker compose up -d
-   ```
+3. **Start the containers**:
+```bash
+docker compose up -d
+```
 
+## Access to services
 
-## Доступ к сервисам
+After startup, services are available at the addresses:
 
-После запуска сервисы доступны по адресам:
-
-| Сервис     | Прямой доступ         | Через Traefik (HTTPS)           |
+| Service    | Direct access         | Via Traefik (HTTPS)             |
 | ---------- | --------------------- | ------------------------------- |
 | Jira       | http://localhost:8080 | https://jira.local              |
 | Crowd      | http://localhost:8095 | https://crowd.local             |
@@ -82,42 +53,39 @@ chmod +x install.sh
 | Bitbucket  | http://localhost:7990 | https://bitbucket.local         |
 | Traefik    | http://localhost:8081 | https://traefik.local/dashboard |
 
-### Настройка hosts
+### Hosts configuration
 
-Для доступа по доменам добавьте в `C:\Windows\System32\drivers\etc\hosts`:
-```
+To access via domains, add to `C:\Windows\System32\drivers\etc\hosts`:
 127.0.0.1 jira.local crowd.local confluence.local bitbucket.local traefik.local
-```
 
 ## Reverse Proxy (Traefik)
 
-Traefik настроен как единая точка входа:
+Traefik is configured as a single entry point:
+- Single port 80 (HTTP) and 443 (HTTPS) for all services
+- Automatic proxying by domain names
+- SSL/TLS termination with self-signed certificates
+- Health checks for all services
+- Traefik Dashboard at traefik.local
 
-- Единый порт 80 (HTTP) и 443 (HTTPS) для всех сервисов
-- Автоматическое проксирование по доменным именам
-- SSL/TLS termination с самоподписанными сертификатами
-- Health checks для всех сервисов
-- Traefik Dashboard на traefik.local
+### Enabling Traefik
 
-### Включение Traefik
-
-Через install.sh выберите использование Traefik, или вручную установите в `.env`:
+Through install.sh select Traefik usage, or manually set in `.env`:
 ```env
 USE_TRAEFIK=true
 ```
 
-Traefik запускается только с профилем `with-proxy`:
+Traefik is launched only with the `with-proxy` profile:
 ```bash
-# Запуск с Traefik
+# Launch with Traefik
 docker compose --profile with-proxy up -d
 
-# Запуск без Traefik (только сервисы напрямую)
+# Launch without Traefik (only services directly)
 docker compose up -d
 ```
 
-### Метки (labels) для Traefik
+### Labels for Traefik
 
-Сервисы автоматически обнаруживаются через Docker labels:
+Services are automatically discovered via Docker labels:
 ```yaml
 labels:
   - "traefik.enable=true"
@@ -127,25 +95,24 @@ labels:
   - "traefik.http.services.jira.loadbalancer.server.port=8080"
 ```
 
-## SSL Сертификаты
+## SSL Certificates
 
-Скрипт `certs/generate-certs.sh` автоматически создаёт самоподписанные сертификаты для каждого домена:
-
+The script `certs/generate-certs.sh` automatically creates self-signed certificates for each domain:
 ```bash
-# Генерация для всех доменов по умолчанию
+# Generate for all domains by default
 ./certs/generate-certs.sh
 
-# Генерация для конкретных доменов
+# Generate for specific domains
 ./certs/generate-certs.sh jira.mycompany.local confluence.mycompany.local
 ```
 
-Для каждого домена создаётся:
-- `{domain}.key` — закрытый ключ (RSA 4096)
-- `{domain}.crt` — самоподписанный сертификат (SHA-256, 10 лет)
-- `{domain}.pem` — объединённый PEM bundle
-- `ca-bundle.crt` — объединённый CA bundle для Traefik
+For each domain the following is created:
+- `{domain}.key` — private key (RSA 4096)
+- `{domain}.crt` — self-signed certificate (SHA-256, 10 years)
+- `{domain}.pem` — combined PEM bundle
+- `ca-bundle.crt` — combined CA bundle for Traefik
 
-### Установка сертификатов в доверенные
+### Installing certificates as trusted
 
 **Windows (PowerShell Admin):**
 ```powershell
@@ -162,52 +129,50 @@ sudo cp certs/*.crt /usr/local/share/ca-certificates/ && sudo update-ca-certific
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain certs/*.crt
 ```
 
-## Корпоративный прокси
+## Corporate proxy
 
-Для работы в корпоративной сети с HTTP прокси:
-
-1. Через install.sh ответьте "Y" на вопрос о корпоративном прокси
-2. Или вручную отредактируйте `proxy.env` и подключите его в `docker-compose.yml`:
+To work in a corporate network with HTTP proxy:
+1. Through install.sh answer "Y" to the question about corporate proxy
+2. Or manually edit `proxy.env` and include it in `docker-compose.yml`:
    ```yaml
    env_file:
      - ./proxy.env
    ```
 
-Параметры прокси передаются в переменные окружения контейнеров (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) и в `JAVA_OPTS` для JVM-приложений.
+Proxy parameters are passed to container environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) and to `JAVA_OPTS` for JVM applications.
 
-## Управление контейнерами
+## Container management
 
 ```bash
-# Просмотр логов
+# View logs
 docker compose logs -f jira
 docker compose logs -f crowd
 
-# Перезапуск сервиса
+# Restart service
 docker compose restart jira
 
-# Остановка всех контейнеров
+# Stop all containers
 docker compose down
 
-# Остановка с удалением томов (осторожно!)
+# Stop and remove volumes (careful!)
 docker compose down -v
 
-# Пересборка образов (после изменений Dockerfile)
+# Rebuild images (after Dockerfile changes)
 docker compose build --no-cache
 docker compose up -d
 ```
 
-## Оптимизация
+## Optimization
 
-Проект включает следующие оптимизации:
+The project includes the following optimizations:
+- **Dockerfile healthcheck** — each service has a healthcheck for correct readiness determination
+- **Resource limits** — memory limits for each container via `deploy.resources.limits.memory`
+- **Build context** — a single context `.` for all Dockerfiles, layers are cached
+- **Compose profiles** — Traefik is launched only with the `--profile with-proxy` flag
 
-- **Dockerfile healthcheck** — каждый сервис имеет healthcheck для корректного определения готовности
-- **Resource limits** — лимиты памяти для каждого контейнера через `deploy.resources.limits.memory`
-- **Build context** — единый context `.` для всех Dockerfile, слои кешируются
-- **Профили Compose** — Traefik запускается только с флагом `--profile with-proxy`
-
-## Требования
+## Requirements
 
 - Docker 24+
 - Docker Compose v2+
-- OpenSSL (для генерации сертификатов, устанавливается автоматически скриптом)
-- Git (опционально, для клонирования)
+- OpenSSL (for generating certificates, installed automatically by script)
+- Git (optional, for cloning)
